@@ -1,5 +1,6 @@
 import ast
 import math
+import os
 import time
 
 import numpy as np
@@ -8,16 +9,30 @@ import matplotlib.pyplot as plt
 import requests
 
 
-def main(gender):
+def main():
     pd.options.mode.chained_assignment = None
     pd.set_option('display.max_columns', 50)
     pd.set_option('display.width', 1000)
-    df_results = pd.read_json('results.json')
+    # get the current directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    base_url = 'https://jellebuitenhuis.nl/backend/survivalrun/results/individual/paginated?'
+    page_number = 0
+    page_size = 10000
+    response = requests.get(base_url + 'page=' + str(page_number) + '&pageSize=' + str(page_size))
+    response_json = response.json()
+    df_results = pd.DataFrame(response_json['content'])
+    while not response_json['last']:
+        response = requests.get(base_url + 'page=' + str(page_number + 1) + '&pageSize=' + str(page_size))
+        response_json = response.json()
+        page_number += 1
+        df_results = df_results.append(pd.DataFrame(response_json['content']))
+
+    # df_results = pd.read_json(os.path.join(current_dir, 'results.json'))
     # only keep results after 'survivalrunDate' 1535456324
-    # df_results = df_results[df_results['survivalrunDate'] >= 1535456324000]
+    df_results = df_results[df_results['survivalrunDate'] >= 1535456324000]
     # only keep results where the category includes 'Heren'
     # df_results = df_results[df_results['category'].str.contains(gender)]
-    print(df_results.head())
 
     df_results = convert_categories(df_results)
 
@@ -59,23 +74,21 @@ def main(gender):
     # for every df_elo assign an empty dataframe to the column 'history'
     df_elo['history'] = [{} for _ in range(len(df_elo))]
 
-    print(len(unique_dates_categories))
     i = 0
     start = time.perf_counter()
     # for every date
     for row in unique_dates_categories.itertuples():
         date = row[1]
         category = row[2]
-        print(date, category, i)
         calculate_new_elo(df_results, category, date, df_elo)
         i += 1
         # if i == 3:
         #     break
     end = time.perf_counter()
-    print(f'Time elapsed: {end - start}')
     df_elo.sort_values(by=['elo'], inplace=True)
-    print(df_elo[df_elo['elo'] != 1000])
     df_elo.to_csv('elo.csv', index=False)
+    # return current directory
+    print(current_dir)
 
 
 def calculate_new_elo(df_results, category, date, df_elo):
@@ -276,7 +289,7 @@ def convert_categories(df_results):
 def plot_tartaros_elo():
     df_elo_csv = pd.read_csv('elo.csv')
     # sum all values in column 'elo' and divide by number of rows
-    print(df_elo_csv['elo'].sum() / len(df_elo_csv))
+    # print(df_elo_csv['elo'].sum() / len(df_elo_csv))
 
     # plot the distribution of elo using percentage bins
     df_elo_csv['elo'].plot(kind='hist', bins=100, title='Elo distribution')
@@ -284,7 +297,7 @@ def plot_tartaros_elo():
 
     df_tartaros = pd.read_json('tartaros.json')
     df_tartaros['name'] = df_tartaros['name'].str.lower()
-    print(df_tartaros.head())
+    # print(df_tartaros.head())
 
     # only keep rows from 'df_elo_csv' where name is in 'df_tartaros'
     df_elo_csv = df_elo_csv[df_elo_csv['name'].isin(df_tartaros['name'])]
@@ -298,7 +311,7 @@ def plot_tartaros_elo():
     # show gridlines behind the points
     plt.grid(True, zorder=0, alpha=0.3)
     plt.show()
-    print(df_elo_csv)
+    # print(df_elo_csv)
 
 
 def plot_user_history(user_name):
@@ -319,7 +332,7 @@ def plot_user_history(user_name):
     df_history.sort_values(by='date', inplace=True)
     # milliseconds to datetime
     df_history['date'] = pd.to_datetime(df_history['date'], unit='ms')
-    print(df_history)
+    # print(df_history)
     # plot elo history
     df_history.plot(x='date', y='elo', kind='line')
 
@@ -330,17 +343,17 @@ if __name__ == '__main__':
     pd.options.mode.chained_assignment = None
     pd.set_option('display.max_columns', 50)
     pd.set_option('display.width', 1000)
-    response = requests.get('https://jellebuitenhuis.nl/backend/survivalrun/results/')
+    # response = requests.get('https://jellebuitenhuis.nl/backend/survivalrun/results/allIndividualResults')
     # response to json
-    json_response = response.json()
+    # json_response = response.json()
     # convert json to dataframe
-    df_results = pd.DataFrame.from_dict(json_response['content'])
-    print(df_results.head())
+    # df_results = pd.DataFrame.from_dict(json_response['content'])
+    # print(df_results.head())
     # to json file
-    df_results.to_json('results2.json')
-    print(len(df_results))
-    df_results = pd.read_json('results.json')
-    print(len(df_results))
-    # main('Heren')
+    # df_results.to_json('results2.json')
+    # print(len(df_results))
+    # df_results = pd.read_json('results.json')
+    # print(len(df_results))
+    main()
     # plot_user_history('Wouter Fokkema')
     # plot_tartaros_elo()
