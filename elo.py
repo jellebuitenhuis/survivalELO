@@ -1,11 +1,8 @@
-import ast
 import math
 import os
-import time
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import requests
 
 
@@ -27,12 +24,6 @@ def main():
         response_json = response.json()
         page_number += 1
         df_results = df_results.append(pd.DataFrame(response_json['content']))
-
-    # df_results = pd.read_json(os.path.join(current_dir, 'results.json'))
-    # only keep results after 'survivalrunDate' 1535456324
-    df_results = df_results[df_results['survivalrunDate'] >= 1535456324000]
-    # only keep results where the category includes 'Heren'
-    # df_results = df_results[df_results['category'].str.contains(gender)]
 
     df_results = convert_categories(df_results)
 
@@ -65,29 +56,21 @@ def main():
     names = df_results['name'].unique()
     df_elo = pd.DataFrame(columns=['name', 'elo', 'history', 'amount_of_runs'])
     df_elo['name'] = names
-    # assign a random to every name
-    # df_elo['elo'] = [0] * len(names)
     # amount of runs is 0 for every name
     df_elo['amount_of_runs'] = [0] * len(names)
-    # assign 1050 to the elo of 'Lenneke'
-    # df_elo.loc[df_elo['name'] == 'heleen schenk', 'elo'] = 1050
     # for every df_elo assign an empty dataframe to the column 'history'
     df_elo['history'] = [{} for _ in range(len(df_elo))]
 
     i = 0
-    start = time.perf_counter()
     # for every date
     for row in unique_dates_categories.itertuples():
         date = row[1]
         category = row[2]
         calculate_new_elo(df_results, category, date, df_elo)
         i += 1
-        # if i == 3:
-        #     break
-    end = time.perf_counter()
     df_elo.sort_values(by=['elo'], inplace=True)
     df_elo.to_csv('elo.csv', index=False)
-    # return current directory
+    # return current directory for backend
     print(current_dir)
 
 
@@ -132,19 +115,10 @@ def calculate_scores(df_results_category_date, df_elo):
 
     # get the elo of every participant from df_elo in a numpy array
     initial_ratings = df_elo[df_elo['name'].isin(df_results_category_date['name'])]
-    # get all initial ratings where the elo is not 0
-    initial_ratings_non_zero = initial_ratings[initial_ratings['elo'] != 0]
-    # calculate the average elo of all initial ratings
-    average_elo = initial_ratings_non_zero['elo'].mean()
-    # print(math.isnan(average_elo))
-    average_elo = 1000 if (average_elo == 0 or math.isnan(average_elo)) else 1000
     # for every elo that is NaN in initial_ratings, assign the average elo
-    initial_ratings['elo'].fillna(average_elo, inplace=True)
-    # print(initial_ratings)
-    # print(average_elo)
+    initial_ratings['elo'].fillna(1000, inplace=True)
     # sort initial_ratings by 'name' using the same order as 'name' in df_results_category_date
     initial_ratings = initial_ratings.sort_values(by=['name'])
-    # print(initial_ratings.head())
     initial_ratings = initial_ratings['elo'].values
     initial_ratings = np.array(initial_ratings)
 
@@ -157,24 +131,15 @@ def calculate_scores(df_results_category_date, df_elo):
 
     expected_scores = get_expected_scores(initial_ratings, n)
 
-    # print(expected_scores)
-
     # get the position of every participant from df_results_category_date in an array sorted by 'position'
     positions = df_results_category_date['position'].values
-    # sort the positions
-    # positions = np.sort(positions)
     # positions to list
     positions = positions.tolist()
 
     actual_scores = get_actual_scores(positions, n)
 
-    # print(actual_scores)
-
-    scale_factor = k * (n - 1)
-    new_ratings = initial_ratings + scale_factor * (actual_scores - expected_scores)
-
     # assign the new elo to the df_new_elo
-    for i in range(len(new_ratings)):
+    for i in range(len(initial_ratings)):
         initial_rating = initial_ratings[i]
         new_rating = actual_scores[i] - expected_scores[i]
         amount_of_runs = df_elo[df_elo['name'] == df_results_category_date['name'].values[i]]['amount_of_runs'].values[0]
@@ -183,8 +148,6 @@ def calculate_scores(df_results_category_date, df_elo):
         scale_factor = k * (n - 1)
         new_rating = initial_rating + scale_factor * new_rating
         df_new_elo.loc[i] = [df_results_category_date['name'].values[i], new_rating]
-
-    # print(df_new_elo)
 
     return df_new_elo
 
@@ -285,75 +248,8 @@ def convert_categories(df_results):
 
     return df_results
 
-
-def plot_tartaros_elo():
-    df_elo_csv = pd.read_csv('elo.csv')
-    # sum all values in column 'elo' and divide by number of rows
-    # print(df_elo_csv['elo'].sum() / len(df_elo_csv))
-
-    # plot the distribution of elo using percentage bins
-    df_elo_csv['elo'].plot(kind='hist', bins=100, title='Elo distribution')
-    plt.show()
-
-    df_tartaros = pd.read_json('tartaros.json')
-    df_tartaros['name'] = df_tartaros['name'].str.lower()
-    # print(df_tartaros.head())
-
-    # only keep rows from 'df_elo_csv' where name is in 'df_tartaros'
-    df_elo_csv = df_elo_csv[df_elo_csv['name'].isin(df_tartaros['name'])]
-
-    # sort by elo
-    df_elo_csv = df_elo_csv.sort_values(by='elo', ascending=False)
-    # make each name a different color
-    plt.scatter(df_elo_csv['name'], df_elo_csv['elo'], c=df_elo_csv['elo'])
-    # make sure the names are readable
-    plt.xticks(rotation=90)
-    # show gridlines behind the points
-    plt.grid(True, zorder=0, alpha=0.3)
-    plt.show()
-    # print(df_elo_csv)
-
-
-def plot_user_history(user_name):
-    df_elo_csv = pd.read_csv('elo.csv')
-    # get 'ruben dinkelman'
-    df_user = df_elo_csv[df_elo_csv['name'] == user_name.lower()]
-    # get history dict for 'ruben dinkelman'
-    history = df_user['history'].values[0]
-    # history to dict
-    history_dict = ast.literal_eval(history)
-    # convert history dict to dataframe
-    df_history = pd.DataFrame.from_dict(history_dict, orient='index')
-    # index to column
-    df_history.reset_index(inplace=True)
-    # rename columns
-    df_history.rename(columns={'index': 'date', 0: 'elo'}, inplace=True)
-    # sort by date
-    df_history.sort_values(by='date', inplace=True)
-    # milliseconds to datetime
-    df_history['date'] = pd.to_datetime(df_history['date'], unit='ms')
-    # print(df_history)
-    # plot elo history
-    df_history.plot(x='date', y='elo', kind='line')
-
-    plt.show()
-
-
 if __name__ == '__main__':
     pd.options.mode.chained_assignment = None
     pd.set_option('display.max_columns', 50)
     pd.set_option('display.width', 1000)
-    # response = requests.get('https://jellebuitenhuis.nl/backend/survivalrun/results/allIndividualResults')
-    # response to json
-    # json_response = response.json()
-    # convert json to dataframe
-    # df_results = pd.DataFrame.from_dict(json_response['content'])
-    # print(df_results.head())
-    # to json file
-    # df_results.to_json('results2.json')
-    # print(len(df_results))
-    # df_results = pd.read_json('results.json')
-    # print(len(df_results))
     main()
-    # plot_user_history('Wouter Fokkema')
-    # plot_tartaros_elo()
