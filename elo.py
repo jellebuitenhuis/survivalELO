@@ -97,8 +97,6 @@ def calculate_new_elo(df_results, category, date, df_elo):
 
 
 def calculate_scores(df_results_category_date, df_elo):
-    k = 64
-
     # sort df_results_category_date by 'position'
     df_results_category_date.sort_values(by=['name'], inplace=True)
 
@@ -144,7 +142,7 @@ def calculate_scores(df_results_category_date, df_elo):
         new_rating = actual_scores[i] - expected_scores[i]
         amount_of_runs = df_elo[df_elo['name'] == df_results_category_date['name'].values[i]]['amount_of_runs'].values[0]
         k_runs = -1*amount_of_runs**2.8+256
-        k = max(k, k_runs)
+        k = max(64, k_runs)
         scale_factor = k * (n - 1)
         new_rating = initial_rating + scale_factor * new_rating
         df_new_elo.loc[i] = [df_results_category_date['name'].values[i], new_rating]
