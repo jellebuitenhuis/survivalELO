@@ -12,19 +12,29 @@ def main():
     # get the current directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
-    base_url = 'https://jellebuitenhuis.nl/backend/survivalrun/results/individual/paginated?'
+    base_url = 'https://localhost:5006/Run/uitslagen/paginated?'
     page_number = 0
-    page_size = 10000
-    response = requests.get(base_url + 'page=' + str(page_number) + '&pageSize=' + str(page_size))
+    page_size = 10
+    response = requests.get(base_url + 'page=' + str(page_number) + '&pageSize=' + str(page_size), verify=False)
     response_json = response.json()
-    df_results = pd.DataFrame(response_json['content'])
-    while not response_json['last']:
-        response = requests.get(base_url + 'page=' + str(page_number + 1) + '&pageSize=' + str(page_size))
+    df_results = pd.DataFrame(response_json['runs'])
+    while response_json['hasNextPage']:
+        response = requests.get(base_url + 'page=' + str(page_number + 1) + '&pageSize=' + str(page_size),
+                                verify=False)
         response_json = response.json()
         page_number += 1
-        df_results = df_results.append(pd.DataFrame(response_json['content']))
+        df_results = pd.concat([df_results, pd.DataFrame(response_json['runs'])])
 
-    df_results = convert_categories(df_results)
+    # new dataframe with only the columns 'firstName', 'lastName', 'position', 'category', 'survivalrunDate'
+    df_new = pd.DataFrame(columns=['firstName', 'lastName', 'position', 'category', 'survivalrunDate', 'points'])
+    for index, row in df_results.iterrows():
+        uitslagen = row['uitslagen']
+        for uitslag in uitslagen:
+            df_new = pd.concat([df_new, pd.DataFrame(
+                [[uitslag['deelnemer']['voornaam'], uitslag['deelnemer']['achternaam'], uitslag['positie'], uitslag['categorie']['naam'],
+                  row['datum'], uitslag['punten']]], columns=['firstName', 'lastName', 'position', 'category', 'survivalrunDate', 'points'])])
+
+    df_results = convert_categories(df_new)
 
     # drop all rows where category is not 'LSR', 'MSR', 'KSR'
     df_results = df_results[df_results['category'].isin(['LSR', 'MSR', 'KSR'])]
@@ -139,8 +149,9 @@ def calculate_scores(df_results_category_date, df_elo):
     for i in range(len(initial_ratings)):
         initial_rating = initial_ratings[i]
         new_rating = actual_scores[i] - expected_scores[i]
-        amount_of_runs = df_elo[df_elo['name'] == df_results_category_date['name'].values[i]]['amount_of_runs'].values[0]
-        k_runs = -1*amount_of_runs**2.8+256
+        amount_of_runs = df_elo[df_elo['name'] == df_results_category_date['name'].values[i]]['amount_of_runs'].values[
+            0]
+        k_runs = -1 * amount_of_runs ** 2.8 + 256
         k = max(64, k_runs)
         scale_factor = k * (n - 1)
         new_rating = initial_rating + scale_factor * new_rating
@@ -244,6 +255,7 @@ def convert_categories(df_results):
         df_results['category'].isin(['KSR', 'MSR', 'LSR', 'Recreatief KSR', 'Recreatief MSR', 'Recreatief LSR'])]
 
     return df_results
+
 
 if __name__ == '__main__':
     pd.options.mode.chained_assignment = None
