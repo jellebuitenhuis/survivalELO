@@ -2,19 +2,17 @@ import os
 
 import numpy as np
 import pandas as pd
-import requests
 
 
 def main():
+    import requests
     pd.options.mode.chained_assignment = None
     pd.set_option('display.max_columns', 50)
     pd.set_option('display.width', 1000)
-    # get the current directory
-    current_dir = os.path.dirname(os.path.abspath(__file__))
 
     base_url = 'https://localhost:5006/Run/uitslagen/paginated?'
     page_number = 0
-    page_size = 10
+    page_size = 100
     response = requests.get(base_url + 'page=' + str(page_number) + '&pageSize=' + str(page_size), verify=False)
     response_json = response.json()
     df_results = pd.DataFrame(response_json['runs'])
@@ -45,15 +43,15 @@ def main():
     df_results = df_results[df_results['lastName'].notnull()]
 
     # strip whitespace from column 'firstName' and 'lastName'
-    df_results['firstName'] = df_results['firstName'].str.strip()
-    df_results['lastName'] = df_results['lastName'].str.strip()
+    df_results['firstName'] = df_results['firstName'].str.strip().str.lower()
+    df_results['lastName'] = df_results['lastName'].str.strip().str.lower()
 
     # merge first and last name then drop first and last name
-    df_results['name'] = df_results['firstName'] + ' ' + df_results['lastName']
-    df_results.drop(columns=['firstName', 'lastName'], inplace=True)
+    df_results['name'] = df_results['firstName'] + df_results['lastName']
+    # df_results.drop(columns=['firstName', 'lastName'], inplace=True)
 
     # convert 'name' to lowercase
-    df_results['name'] = df_results['name'].str.lower()
+    # df_results['name'] = df_results['name']
 
     # sort by 'survivalrunDate' and 'category'
     df_results.sort_values(by=['survivalrunDate', 'category'], inplace=True)
@@ -61,10 +59,16 @@ def main():
     # get every unique combination of 'survivalrunDate' and 'category'
     unique_dates_categories = df_results[['survivalrunDate', 'category']].drop_duplicates()
 
-    # Get all unique names
+    # Get dataframe with all unique names, include 'firstName' and 'lastName'
     names = df_results['name'].unique()
+    unique_names = df_results[['firstName', 'lastName']].drop_duplicates()
+
+
     df_elo = pd.DataFrame(columns=['name', 'elo', 'history', 'amount_of_runs'])
     df_elo['name'] = names
+    # assign first name and last name to df_elo
+    df_elo['firstName'] = unique_names['firstName'].values
+    df_elo['lastName'] = unique_names['lastName'].values
     # amount of runs is 0 for every name
     df_elo['amount_of_runs'] = [0] * len(names)
     # for every df_elo assign an empty dataframe to the column 'history'
@@ -78,9 +82,21 @@ def main():
         calculate_new_elo(df_results, category, date, df_elo)
         i += 1
     df_elo.sort_values(by=['elo'], inplace=True)
-    df_elo.to_csv('elo.csv', index=False)
-    # return current directory for backend
-    print(current_dir)
+
+    # convert the dataframe to a list of requests
+    # Each request has the first name, last name, elo and history
+    # history is a dictionary with the date as key and the elo as value
+    df_request = pd.DataFrame(columns=['Voornaam', 'Achternaam', 'Elo', 'EloHistory'])
+    df_request['Voornaam'] = df_elo['firstName'].values
+    df_request['Achternaam'] = df_elo['lastName'].values
+    df_request['Elo'] = df_elo['elo'].values
+    df_request['EloHistory'] = df_elo['history']
+    # transform EloHistory to an array of dictionaries
+    df_request['EloHistory'] = df_request['EloHistory'].apply(lambda x: [x])
+    json = df_request.to_dict('records')
+
+    url = 'https://localhost:5006/Run/elo'
+    requests.patch(url, json=json, verify=False)
 
 
 def calculate_new_elo(df_results, category, date, df_elo):
