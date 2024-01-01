@@ -1,4 +1,4 @@
-import os
+import time
 
 import numpy as np
 import pandas as pd
@@ -24,13 +24,14 @@ def main():
         df_results = pd.concat([df_results, pd.DataFrame(response_json['runs'])])
 
     # new dataframe with only the columns 'firstName', 'lastName', 'position', 'category', 'survivalrunDate'
-    df_new = pd.DataFrame(columns=['firstName', 'lastName', 'position', 'category', 'survivalrunDate', 'points'])
-    for index, row in df_results.iterrows():
-        uitslagen = row['uitslagen']
-        for uitslag in uitslagen:
-            df_new = pd.concat([df_new, pd.DataFrame(
-                [[uitslag['deelnemer']['voornaam'], uitslag['deelnemer']['achternaam'], uitslag['positie'], uitslag['categorie']['naam'],
-                  row['datum'], uitslag['punten']]], columns=['firstName', 'lastName', 'position', 'category', 'survivalrunDate', 'points'])])
+    df_new = pd.DataFrame([{'firstName': uitslag['deelnemer']['voornaam'],
+                            'lastName': uitslag['deelnemer']['achternaam'],
+                            'position': uitslag['positie'],
+                            'category': uitslag['categorie']['naam'] + str(uitslag['categorie']['sbnId']),
+                            'survivalrunDate': row['datum'],
+                            'points': uitslag['punten']}
+                           for index, row in df_results.iterrows()
+                           for uitslag in row['uitslagen']])
 
     df_results = convert_categories(df_new)
 
@@ -48,21 +49,16 @@ def main():
 
     # merge first and last name then drop first and last name
     df_results['name'] = df_results['firstName'] + df_results['lastName']
-    # df_results.drop(columns=['firstName', 'lastName'], inplace=True)
-
-    # convert 'name' to lowercase
-    # df_results['name'] = df_results['name']
 
     # sort by 'survivalrunDate' and 'category'
     df_results.sort_values(by=['survivalrunDate', 'category'], inplace=True)
 
     # get every unique combination of 'survivalrunDate' and 'category'
-    unique_dates_categories = df_results[['survivalrunDate', 'category']].drop_duplicates()
-
+    unique_dates_categories = df_results.groupby(['survivalrunDate', 'category'])
+    unique_dates_categories = [(name, group) for name, group in df_results.groupby(['survivalrunDate', 'category'])]
     # Get dataframe with all unique names, include 'firstName' and 'lastName'
     names = df_results['name'].unique()
     unique_names = df_results[['firstName', 'lastName']].drop_duplicates()
-
 
     df_elo = pd.DataFrame(columns=['name', 'elo', 'history', 'amount_of_runs'])
     df_elo['name'] = names
@@ -73,26 +69,25 @@ def main():
     df_elo['amount_of_runs'] = [0] * len(names)
     # for every df_elo assign an empty dataframe to the column 'history'
     df_elo['history'] = [{} for _ in range(len(df_elo))]
+    # set elo to 1000 for every name
+    df_elo['elo'] = 1000
+    # sort by name
+    df_elo.sort_values(by=['name'], inplace=True)
 
-    i = 0
-    # for every date
-    for row in unique_dates_categories.itertuples():
-        date = row[1]
-        category = row[2]
-        calculate_new_elo(df_results, category, date, df_elo)
-        i += 1
+    for name, group in unique_dates_categories:
+        date, category = name
+        calculate_new_elo(group, category, date, df_elo)
     df_elo.sort_values(by=['elo'], inplace=True)
 
-    # convert the dataframe to a list of requests
-    # Each request has the first name, last name, elo and history
-    # history is a dictionary with the date as key and the elo as value
+    # convert the dataframe to a list of requests.
+    # Each request has the first name, last name, elo and history.
+    # History is a dictionary with the date as key and the elo as value
     df_request = pd.DataFrame(columns=['Voornaam', 'Achternaam', 'Elo', 'EloHistory'])
     df_request['Voornaam'] = df_elo['firstName'].values
     df_request['Achternaam'] = df_elo['lastName'].values
     df_request['Elo'] = df_elo['elo'].values
-    df_request['EloHistory'] = df_elo['history']
-    # transform EloHistory to an array of dictionaries
-    df_request['EloHistory'] = df_request['EloHistory'].apply(lambda x: [x])
+    df_request.sort_values(by=['Elo'], inplace=True)
+    df_request['EloHistory'] = df_elo['history'].values
     json = df_request.to_dict('records')
 
     url = 'https://localhost:5006/Run/elo'
@@ -125,19 +120,18 @@ def calculate_scores(df_results_category_date, df_elo):
     # sort df_results_category_date by 'position'
     df_results_category_date.sort_values(by=['name'], inplace=True)
 
-    # print(df_results_category_date.head())
-
+    # get the number of participants
     participants = len(df_results_category_date)
+
     # calculate the amount of distinct matchups
     matchups = participants * (participants - 1) / 2
 
     if matchups == 0:
         return
 
-    df_new_elo = pd.DataFrame(columns=['name', 'elo'])
-
     # get the elo of every participant from df_elo in a numpy array
     initial_ratings = df_elo[df_elo['name'].isin(df_results_category_date['name'])]
+
     # for every elo that is NaN in initial_ratings, assign the average elo
     initial_ratings['elo'].fillna(1000, inplace=True)
     # sort initial_ratings by 'name' using the same order as 'name' in df_results_category_date
@@ -145,33 +139,31 @@ def calculate_scores(df_results_category_date, df_elo):
     initial_ratings = initial_ratings['elo'].values
     initial_ratings = np.array(initial_ratings)
 
-    if not isinstance(initial_ratings, np.ndarray):
-        initial_ratings = np.array(initial_ratings)
-    if initial_ratings.ndim > 1:
-        raise ValueError(f"initial_ratings should be 1-dimensional array (received {initial_ratings.ndim})")
+    # get the expected scores for each participant
+    expected_scores = get_expected_scores(initial_ratings, participants)
 
-    n = len(initial_ratings)
-
-    expected_scores = get_expected_scores(initial_ratings, n)
-
-    # get the position of every participant from df_results_category_date in an array sorted by 'position'
+    # get the position of every participant from df_results_category_date in a numpy array sorted by 'position'
     positions = df_results_category_date['position'].values
-    # positions to list
     positions = positions.tolist()
 
-    actual_scores = get_actual_scores(positions, n)
+    # get the actual scores for each participant
+    actual_scores = get_actual_scores(positions, participants)
 
-    # assign the new elo to the df_new_elo
-    for i in range(len(initial_ratings)):
-        initial_rating = initial_ratings[i]
-        new_rating = actual_scores[i] - expected_scores[i]
-        amount_of_runs = df_elo[df_elo['name'] == df_results_category_date['name'].values[i]]['amount_of_runs'].values[
-            0]
-        k_runs = -1 * amount_of_runs ** 2.8 + 256
-        k = max(64, k_runs)
-        scale_factor = k * (n - 1)
-        new_rating = initial_rating + scale_factor * new_rating
-        df_new_elo.loc[i] = [df_results_category_date['name'].values[i], new_rating]
+    # get the amount of runs for each participant from df_elo in a numpy array
+    amount_of_runs = df_elo[df_elo['name'].isin(df_results_category_date['name'])]['amount_of_runs'].values
+
+    # calculate the k factor for each participant
+    k_runs = -1 * amount_of_runs ** 2.8 + 256
+    k = np.maximum(64, k_runs)
+
+    # calculate the scale factor for each participant
+    scale_factor = k * (participants - 1)
+
+    # calculate the new ratings for each participant
+    new_ratings = initial_ratings + scale_factor * (actual_scores - expected_scores)
+
+    # create a new dataframe with the updated ratings
+    df_new_elo = pd.DataFrame({'name': df_results_category_date['name'], 'elo': new_ratings})
 
     return df_new_elo
 
