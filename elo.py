@@ -10,7 +10,7 @@ def main():
     pd.set_option('display.max_columns', 50)
     pd.set_option('display.width', 1000)
 
-    base_url = 'https://localhost:5006/Run/uitslagen/paginated?'
+    base_url = 'https://uvpapi.jellebuitenhuis.nl/Run/uitslagen/paginated?'
     page_number = 0
     page_size = 100
     response = requests.get(base_url + 'page=' + str(page_number) + '&pageSize=' + str(page_size), verify=False)
