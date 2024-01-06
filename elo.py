@@ -90,7 +90,7 @@ def main():
     df_request['EloHistory'] = df_elo['history'].values
     json = df_request.to_dict('records')
 
-    url = 'https://localhost:5006/Run/elo'
+    url = 'https://uvpapi.jellebuitenhuis.nl/Run/elo'
     requests.patch(url, json=json, verify=False)
 
 
